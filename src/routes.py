@@ -1,8 +1,13 @@
 import time
+import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from models import User, UserCreate, Document, DocumentProgress, get_db, get_user
+
+
+ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+
 
 router = APIRouter(
     dependencies=[Depends(get_db)],
@@ -26,6 +31,9 @@ def authorize_request(request: Request, db: Session):
 
 @router.post("/users/create", status_code=201)
 def register(user: UserCreate, db: Session = Depends(get_db)):
+    if not ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="Registration is disabled")
+
     if get_user(db, user.username):
         raise HTTPException(status_code=409, detail="Username is already registered")
 
