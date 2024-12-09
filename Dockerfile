@@ -16,4 +16,6 @@ COPY ./docker-entry.sh /app/docker-entry.sh
 
 EXPOSE 8000
 
+VOLUME ["/data"]
+
 ENTRYPOINT ["bash", "/app/docker-entry.sh"]
