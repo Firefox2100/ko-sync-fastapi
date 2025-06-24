@@ -159,6 +159,9 @@ async def init_async_models():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    async with metadata_engine.begin() as conn:
+        await conn.run_sync(MetadataBase.metadata.create_all)
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
