@@ -1,22 +1,28 @@
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes import router
-from models import get_db, get_metadata_db, sync_books
+from models import sync_books, init_async_models, AsyncSessionLocal, MetadataAsyncSessionLocal
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_async_models()
+
+    async with AsyncSessionLocal() as db, MetadataAsyncSessionLocal() as metadata_db:
+        await sync_books(db, metadata_db)
+
+    yield
 
 
 def create_app():
-    # Sync books before starting the app
-    db = next(get_db())
-    metadata_db = next(get_metadata_db())
-    sync_books(db, metadata_db)
-
-    app = FastAPI(title="KOReader Sync Server")
+    app = FastAPI(title="KOReader Sync Server", lifespan=lifespan)
 
     app.add_middleware(
-        CORSMiddleware,             # noqa
+        CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],

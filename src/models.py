@@ -1,12 +1,13 @@
 import os
 import hashlib
-from sqlalchemy import Column, Integer, Float, String, Boolean, TIMESTAMP, \
-    ForeignKey, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, relationship, sessionmaker
+from sqlalchemy import Column, Integer, Float, String, Boolean, TIMESTAMP, ForeignKey
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, AsyncGenerator
+from sqlalchemy.future import select
+from contextlib import asynccontextmanager
 
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     'Document',
     'UserCreate',
     'DocumentProgress',
+    'init_async_models',
     'get_db',
     'get_metadata_db',
     'get_user',
@@ -132,61 +134,56 @@ class DocumentProgress(BaseModel):
     device_id: Optional[str] = None
 
 
-def init_models():
-    if not os.path.exists(DATA_PATH):
-        os.makedirs(DATA_PATH, exist_ok=True)
-
-    db_url = f'sqlite:///{DATA_PATH}/app.db'
-
-    engine = create_engine(db_url, connect_args={"check_same_thread": False})
-    local_session_class = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    return local_session_class
-
-
-def init_metadata_models():
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(f"Data path {DATA_PATH} does not exist.")
-
-    db_url = f'sqlite:///{DATA_PATH}/metadata.db?mode=ro'
-
-    engine = create_engine(db_url, connect_args={"check_same_thread": False})
-    local_session_class = sessionmaker(bind=engine)
-
-    return local_session_class
+def get_async_engine(path: str, readonly: bool = False):
+    if readonly:
+        return create_async_engine(
+            f"sqlite+aiosqlite:///{path}?mode=ro",
+            connect_args={"uri": True}  # ✅ Enable SQLite URI interpretation
+        )
+    else:
+        return create_async_engine(
+            f"sqlite+aiosqlite:///{path}",
+            connect_args={"check_same_thread": False}
+        )
 
 
-LocalSession = init_models()
-MetadataLocalSession = init_metadata_models()
+engine = get_async_engine(f"{DATA_PATH}/app.db")
+metadata_engine = get_async_engine(f"{DATA_PATH}/metadata.db", readonly=True)
+
+AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+MetadataAsyncSessionLocal = async_sessionmaker(bind=metadata_engine, class_=AsyncSession, expire_on_commit=False)
 
 
-def get_db():
-    db = LocalSession()
-    try:
-        yield db
-    finally:
-        db.close()
+async def init_async_models():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def get_metadata_db():
-    db = MetadataLocalSession()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
-def get_user(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+async def get_metadata_db() -> AsyncGenerator[AsyncSession, None]:
+    async with MetadataAsyncSessionLocal() as session:
+        yield session
 
 
-def sync_books(db: Session, metadata_db: Session):
-    """
-    Sync books from metadata database to the main database.
-    """
-    metadata_books = metadata_db.query(MetadataBook).join(MetadataBook.data).all()
+async def get_user(db: AsyncSession, username: str) -> Optional[User]:
+    result = await db.execute(select(User).filter_by(username=username))
+    return result.scalar_one_or_none()
+
+
+async def sync_books(db: AsyncSession, metadata_db: AsyncSession):
+    result = await metadata_db.execute(
+        select(MetadataBook)
+        .options(
+            selectinload(MetadataBook.data),
+            selectinload(MetadataBook.authors_link).selectinload(MetadataBookAuthor.author_relation)
+        )
+        .join(MetadataBook.data)
+    )
+    metadata_books = result.scalars().all()
 
     for metadata_book in metadata_books:
         if not metadata_book.data:
@@ -196,7 +193,6 @@ def sync_books(db: Session, metadata_db: Session):
         data_format = metadata_book.data[0].format.lower()
 
         author_name = metadata_book.authors_link[0].author_relation.name if metadata_book.authors_link else "Unknown"
-
         document_name = hashlib.md5(f'{author_name} - {data_name}.{data_format}'.encode('utf-8')).hexdigest()
 
         stmt = sqlite_insert(Book).values(
@@ -207,6 +203,6 @@ def sync_books(db: Session, metadata_db: Session):
             set_=dict(document_name=document_name),
         )
 
-        db.execute(stmt)
+        await db.execute(stmt)
 
-    db.commit()
+    await db.commit()
