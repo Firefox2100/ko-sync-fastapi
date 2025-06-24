@@ -3,14 +3,15 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from models import User, UserCreate, Document, DocumentProgress, get_db, get_user
+from models import User, UserCreate, Document, DocumentProgress, MetadataBook, Book, get_db, get_metadata_db,\
+    get_user
 
 
 ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 
 
 router = APIRouter(
-    dependencies=[Depends(get_db)],
+    dependencies=[Depends(get_db), Depends(get_metadata_db)],
     responses={404: {"description": "Not found"}},
 )
 
@@ -23,7 +24,7 @@ def authorize_request(request: Request, db: Session):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     user = get_user(db, username)
-    if not user or user.password != password:  # Fix userkey reference
+    if not user or user.password != password:  # Fix user key reference
         raise HTTPException(status_code=403, detail="Forbidden")
 
     return user
@@ -78,7 +79,11 @@ def get_progress(document: str, request: Request, db: Session = Depends(get_db))
 
 
 @router.put("/syncs/progress", status_code=200)
-def update_progress(position: DocumentProgress, request: Request, db: Session = Depends(get_db)):
+def update_progress(position: DocumentProgress,
+                    request: Request,
+                    db: Session = Depends(get_db),
+                    metadata_db: Session = Depends(get_metadata_db)
+                    ):
     user = authorize_request(request, db)
 
     doc = (
@@ -90,7 +95,14 @@ def update_progress(position: DocumentProgress, request: Request, db: Session = 
     timestamp = int(time.time())
 
     if not doc:
-        # Create a new document entry if it doesn't exist
+        # Attempt to find the matching Book by hash
+        book = (
+            db.query(Book)
+            .filter(Book.document_name == position.document)
+            .first()
+        )
+
+        # Create a new document entry
         doc = Document(
             document_name=position.document,
             progress=position.progress,
@@ -99,6 +111,7 @@ def update_progress(position: DocumentProgress, request: Request, db: Session = 
             device_id=position.device_id,
             timestamp=timestamp,
             user_id=user.id,
+            book_id=book.id if book else None,
         )
         db.add(doc)
     else:
@@ -110,9 +123,65 @@ def update_progress(position: DocumentProgress, request: Request, db: Session = 
         doc.timestamp = timestamp
 
     db.commit()
-    db.refresh(doc)  # Ensure updated fields are available in the object
+    db.refresh(doc)
 
     return {"document": doc.document_name, "timestamp": doc.timestamp}
+
+
+
+@router.get("/admin/books", status_code=200)
+def get_books(request: Request,
+              db: Session = Depends(get_db),
+              metadata_db: Session = Depends(get_metadata_db)
+              ):
+    user = authorize_request(request, db)
+
+    documents = user.documents
+
+    books = []
+
+    for document in documents:
+        if document.book_id:
+            book = document.book
+
+            # Query the metadata database for book details
+            metadata_book = (
+                metadata_db.query(MetadataBook)
+                .filter(Book.id == book.id)
+                .first()
+            )
+
+            if metadata_book:
+                books.append({
+                    "id": book.id,
+                    "document_name": document.document_name,
+                    "progress": document.progress,
+                    "percentage": document.percentage,
+                    "device": document.device,
+                    "device_id": document.device_id,
+                    "timestamp": document.timestamp,
+                    "metadata": {
+                        "title": metadata_book.title,
+                        "sort": metadata_book.sort,
+                    }
+                })
+
+    return books
+
+
+@router.delete("/admin/books/{document_id}", status_code=200)
+def delete_book(document_id: str, request: Request, db: Session = Depends(get_db)):
+    user = authorize_request(request, db)
+
+    doc = db.query(Document).filter(Document.id == document_id, Document.user_id == user.id).first()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    db.delete(doc)
+    db.commit()
+
+    return {"document": doc.document_name}
 
 
 @router.get("/healthcheck", status_code=200)

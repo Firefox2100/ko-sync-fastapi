@@ -10,7 +10,7 @@ def create_app():
     app = FastAPI(title="KOReader Sync Server")
 
     app.add_middleware(
-        CORSMiddleware,
+        CORSMiddleware,             # noqa
         allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
