@@ -1,8 +1,8 @@
 FROM python:3.10-slim
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV DATA_PATH /data
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DATA_PATH=/data
 
 WORKDIR /app
 
@@ -17,5 +17,8 @@ COPY ./docker-entry.sh /app/docker-entry.sh
 EXPOSE 8000
 
 VOLUME ["/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl --fail http://localhost:8000/healthcheck || exit 1
 
 ENTRYPOINT ["bash", "/app/docker-entry.sh"]

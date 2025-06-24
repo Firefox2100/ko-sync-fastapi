@@ -7,13 +7,14 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from pydantic import BaseModel
 from typing import Optional, AsyncGenerator
 from sqlalchemy.future import select
-from contextlib import asynccontextmanager
 
 
 __all__ = [
     'Book',
     'MetadataBook',
     'MetadataData',
+    'MetadataAuthor',
+    'MetadataBookAuthor',
     'User',
     'Document',
     'UserCreate',
