@@ -142,18 +142,16 @@ def get_books(request: Request,
 
     for document in documents:
         if document.book_id:
-            book = document.book
-
             # Query the metadata database for book details
             metadata_book = (
                 metadata_db.query(MetadataBook)
-                .filter(Book.id == book.id)
+                .filter(MetadataBook.id == document.book_id)
                 .first()
             )
 
             if metadata_book:
                 books.append({
-                    "id": book.id,
+                    "id": document.book_id,
                     "document_name": document.document_name,
                     "progress": document.progress,
                     "percentage": document.percentage,
@@ -163,6 +161,7 @@ def get_books(request: Request,
                     "metadata": {
                         "title": metadata_book.title,
                         "sort": metadata_book.sort,
+                        "authors": [link.author_relation.name for link in metadata_book.authors_link]
                     }
                 })
 

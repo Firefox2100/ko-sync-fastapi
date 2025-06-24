@@ -4,9 +4,15 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes import router
+from models import get_db, get_metadata_db, sync_books
 
 
 def create_app():
+    # Sync books before starting the app
+    db = next(get_db())
+    metadata_db = next(get_metadata_db())
+    sync_books(db, metadata_db)
+
     app = FastAPI(title="KOReader Sync Server")
 
     app.add_middleware(

@@ -33,7 +33,7 @@ DATA_PATH = os.getenv("DATA_PATH", "./data")
 class MetadataBook(MetadataBase):
     __tablename__ = "books"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False, default="Unknown")
     sort = Column(String)
     timestamp = Column(TIMESTAMP)
@@ -49,18 +49,41 @@ class MetadataBook(MetadataBase):
     last_modified = Column(TIMESTAMP, nullable=False)
 
     data = relationship("MetadataData", back_populates="book_relation", cascade="all, delete-orphan")
+    authors_link = relationship("MetadataBookAuthor", back_populates="book_relation", cascade="all, delete-orphan")
 
 
 class MetadataData(MetadataBase):
     __tablename__ = "data"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     book = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     format = Column(String, nullable=False)
     uncompressed_size = Column(Integer, nullable=False)
     name = Column(String, nullable=False)
 
     book_relation = relationship("MetadataBook", back_populates="data")
+
+
+class MetadataAuthor(MetadataBase):
+    __tablename__ = "authors"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    sort = Column(String, nullable=False)
+    link = Column(String, nullable=True)
+
+    books_link = relationship("MetadataBookAuthor", back_populates="author_relation", cascade="all, delete-orphan")
+
+
+class MetadataBookAuthor(MetadataBase):
+    __tablename__ = "books_authors_link"
+
+    id = Column(Integer, primary_key=True)
+    book = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
+    author = Column(Integer, ForeignKey("authors.id"), nullable=False, index=True)
+
+    book_relation = relationship("MetadataBook", back_populates="authors_link")
+    author_relation = relationship("MetadataAuthor", back_populates="books_link")
 
 
 class User(Base):
@@ -169,9 +192,12 @@ def sync_books(db: Session, metadata_db: Session):
         if not metadata_book.data:
             continue
 
-        data_name = metadata_book.data[0].name
+        data_name = metadata_book.title
         data_format = metadata_book.data[0].format.lower()
-        document_name = hashlib.md5(f'{data_name}.{data_format}'.encode('utf-8')).hexdigest()
+
+        author_name = metadata_book.authors_link[0].author_relation.name if metadata_book.authors_link else "Unknown"
+
+        document_name = hashlib.md5(f'{author_name} - {data_name}.{data_format}'.encode('utf-8')).hexdigest()
 
         stmt = sqlite_insert(Book).values(
             id=metadata_book.id,
