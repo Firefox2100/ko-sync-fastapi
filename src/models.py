@@ -148,7 +148,7 @@ def get_async_engine(path: str, readonly: bool = False):
         )
 
 
-engine = get_async_engine(f"{DATA_PATH}/app.db")
+engine = get_async_engine(f"{DATA_PATH}/ko-sync.db")
 metadata_engine = get_async_engine(f"{DATA_PATH}/metadata.db", readonly=True)
 
 AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
